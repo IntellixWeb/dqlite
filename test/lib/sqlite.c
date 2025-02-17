@@ -2,16 +2,22 @@
 
 #include "sqlite.h"
 
-void test_sqlite_setup(const MunitParameter params[]) {
+void test_sqlite_setup(const MunitParameter params[])
+{
 	int rc;
 	(void)params;
-	rc = sqlite3_shutdown();
+	rc = sqlite3_initialize();
 	if (rc != SQLITE_OK) {
 		munit_errorf("sqlite_init(): %s", sqlite3_errstr(rc));
 	}
+	rc = sqlite3_threadsafe();
+	if (!(rc == 1 || rc == 2)) {
+		munit_errorf("sqlite3_threadsafe(): %d", rc);
+	}
 }
 
-void test_sqlite_tear_down() {
+void test_sqlite_tear_down()
+{
 	int rc;
 	rc = sqlite3_shutdown();
 	if (rc != SQLITE_OK) {

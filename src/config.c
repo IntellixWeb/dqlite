@@ -28,7 +28,11 @@
  * TODO: make this thread safe. */
 static unsigned serial = 1;
 
-int config__init(struct config *c, dqlite_node_id id, const char *address)
+int config__init(struct config *c,
+		 dqlite_node_id id,
+		 const char *address,
+		 const char *raft_dir,
+		 const char *database_dir)
 {
 	int rv;
 	c->id = id;
@@ -46,6 +50,14 @@ int config__init(struct config *c, dqlite_node_id id, const char *address)
 	c->logger.emit = loggerDefaultEmit;
 	c->failure_domain = 0;
 	c->weight = 0;
+
+	snprintf(c->raft_dir, sizeof(c->raft_dir), "%s", (raft_dir != NULL) ? raft_dir : "");
+	snprintf(c->database_dir, sizeof(c->database_dir), "%s", database_dir);
+
+	c->disk = false;
+	c->voters = 3;
+	c->standbys = 0;
+	c->pool_thread_count = 4;
 	serial++;
 	return 0;
 }

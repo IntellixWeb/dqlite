@@ -5,9 +5,10 @@
 #ifndef COMMAND_H_
 #define COMMAND_H_
 
-#include <raft.h>
+#include "../include/dqlite.h"
 
 #include "lib/serialize.h"
+#include "raft.h"
 
 /* Command type codes */
 enum { COMMAND_OPEN = 1, COMMAND_FRAMES, COMMAND_UNDO, COMMAND_CHECKPOINT };
@@ -53,13 +54,20 @@ typedef struct frames frames_t;
 
 COMMAND__TYPES(COMMAND__DEFINE);
 
-int command__encode(int type, const void *command, struct raft_buffer *buf);
+DQLITE_VISIBLE_TO_TESTS int command__encode(int type,
+					    const void *command,
+					    struct raft_buffer *buf);
 
-int command__decode(const struct raft_buffer *buf, int *type, void **command);
+DQLITE_VISIBLE_TO_TESTS int command__decode(const struct raft_buffer *buf,
+					    int *type,
+					    void **command);
 
-int command_frames__page_numbers(const struct command_frames *c,
-				 unsigned long *page_numbers[]);
+DQLITE_VISIBLE_TO_TESTS int command_frames__page_numbers(
+    const struct command_frames *c,
+    unsigned long *page_numbers[]);
 
-void command_frames__pages(const struct command_frames *c, void **pages);
+DQLITE_VISIBLE_TO_TESTS void command_frames__pages(
+    const struct command_frames *c,
+    void **pages);
 
 #endif /* COMMAND_H_*/

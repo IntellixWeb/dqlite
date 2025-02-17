@@ -17,16 +17,15 @@ TEST_MODULE(concurrency);
 #define N_GATEWAYS 2
 
 /* Context for a gateway handle request */
-struct context
-{
+struct context {
 	bool invoked;
 	int status;
-	int type;
+	uint8_t type;
+	uint8_t schema;
 };
 
 /* Standalone leader database connection */
-struct connection
-{
+struct connection {
 	struct gateway gateway;
 	struct buffer request;  /* Request payload */
 	struct buffer response; /* Response payload */
@@ -38,29 +37,31 @@ struct connection
 	FIXTURE_CLUSTER; \
 	struct connection connections[N_GATEWAYS]
 
-#define SETUP                                                        \
-	unsigned i;                                                  \
-	int rc;                                                      \
-	SETUP_CLUSTER(V2);					     \
-	CLUSTER_ELECT(0);                                            \
-	for (i = 0; i < N_GATEWAYS; i++) {                           \
-		struct connection *c = &f->connections[i];           \
-		struct request_open open;                            \
-		struct response_db db;                               \
-		gateway__init(&c->gateway, CLUSTER_CONFIG(0),        \
+#define SETUP                                                              \
+	unsigned i;                                                        \
+	int rc;                                                            \
+	pool_ut_fallback()->flags |= POOL_FOR_UT_NOT_ASYNC;                \
+	pool_ut_fallback()->flags |= POOL_FOR_UT;                          \
+	SETUP_CLUSTER(V2);                                                 \
+	CLUSTER_ELECT(0);                                                  \
+	for (i = 0; i < N_GATEWAYS; i++) {                                 \
+		struct connection *c = &f->connections[i];                 \
+		struct request_open open;                                  \
+		struct response_db db;                                     \
+		gateway__init(&c->gateway, CLUSTER_CONFIG(0),              \
 			      CLUSTER_REGISTRY(0), CLUSTER_RAFT(0)); \
-		c->handle.data = &c->context;                        \
-		rc = buffer__init(&c->request);                      \
-		munit_assert_int(rc, ==, 0);                         \
-		rc = buffer__init(&c->response);                     \
-		munit_assert_int(rc, ==, 0);                         \
-		open.filename = "test";                              \
-		open.vfs = "";                                       \
-		ENCODE(c, &open, open);                              \
-		HANDLE(c, OPEN);                                     \
-		ASSERT_CALLBACK(c, 0, DB);                           \
-		DECODE(c, &db, db);                                  \
-		munit_assert_int(db.id, ==, 0);                      \
+		c->handle.data = &c->context;                              \
+		rc = buffer__init(&c->request);                            \
+		munit_assert_int(rc, ==, 0);                               \
+		rc = buffer__init(&c->response);                           \
+		munit_assert_int(rc, ==, 0);                               \
+		open.filename = "test";                                    \
+		open.vfs = "";                                             \
+		ENCODE(c, &open, open);                                    \
+		HANDLE(c, OPEN);                                           \
+		ASSERT_CALLBACK(c, 0, DB);                                 \
+		DECODE(c, &db, db);                                        \
+		munit_assert_int(db.id, ==, 0);                            \
 	}
 
 #define TEAR_DOWN                                          \
@@ -73,12 +74,16 @@ struct connection
 	}                                                  \
 	TEAR_DOWN_CLUSTER;
 
-static void fixture_handle_cb(struct handle *req, int status, int type)
+static void fixture_handle_cb(struct handle *req,
+			      int status,
+			      uint8_t type,
+			      uint8_t schema)
 {
 	struct context *c = req->data;
 	c->invoked = true;
 	c->status = status;
 	c->type = type;
+	c->schema = schema;
 }
 
 /******************************************************************************
@@ -92,7 +97,7 @@ static void fixture_handle_cb(struct handle *req, int status, int type)
 #define ENCODE(C, REQUEST, LOWER)                               \
 	{                                                       \
 		size_t n2 = request_##LOWER##__sizeof(REQUEST); \
-		void *cursor;                                   \
+		char *cursor;                                   \
 		buffer__reset(&C->request);                     \
 		cursor = buffer__advance(&C->request, n2);      \
 		munit_assert_ptr_not_null(cursor);              \
@@ -113,17 +118,16 @@ static void fixture_handle_cb(struct handle *req, int status, int type)
 
 /* Submit a request of the given type to the given connection and check that no
  * error occurs. */
-#define HANDLE(C, TYPE)                                                 \
-	{                                                               \
-		struct cursor cursor;                                   \
-		int rc2;                                                \
-		cursor.p = buffer__cursor(&C->request, 0);              \
-		cursor.cap = buffer__offset(&C->request);               \
-		buffer__reset(&C->response);                            \
-		rc2 = gateway__handle(&C->gateway, &C->handle,          \
-				      DQLITE_REQUEST_##TYPE, &cursor,   \
-				      &C->response, fixture_handle_cb); \
-		munit_assert_int(rc2, ==, 0);                           \
+#define HANDLE(C, TYPE)                                                       \
+	{                                                                     \
+		int rc2;                                                      \
+		C->handle.cursor.p = buffer__cursor(&C->request, 0);          \
+		C->handle.cursor.cap = buffer__offset(&C->request);           \
+		buffer__reset(&C->response);                                  \
+		rc2 = gateway__handle(&C->gateway, &C->handle,                \
+				      DQLITE_REQUEST_##TYPE, 0, &C->response, \
+				      fixture_handle_cb);                     \
+		munit_assert_int(rc2, ==, 0);                                 \
 	}
 
 /* Prepare a statement on the given connection. The ID will be saved in
@@ -136,6 +140,7 @@ static void fixture_handle_cb(struct handle *req, int status, int type)
 		prepare.sql = SQL;              \
 		ENCODE(C, &prepare, prepare);   \
 		HANDLE(C, PREPARE);             \
+		WAIT(C);                        \
 		ASSERT_CALLBACK(C, 0, STMT);    \
 		DECODE(C, &stmt, stmt);         \
 		*(STMT_ID) = stmt.id;           \
@@ -204,8 +209,7 @@ static void fixture_handle_cb(struct handle *req, int status, int type)
  *
  ******************************************************************************/
 
-struct exec_fixture
-{
+struct exec_fixture {
 	FIXTURE;
 	struct connection *c1;
 	struct connection *c2;
@@ -281,8 +285,7 @@ TEST_CASE(exec, tx, NULL)
  *
  ******************************************************************************/
 
-struct query_fixture
-{
+struct query_fixture {
 	FIXTURE;
 	struct connection *c1;
 	struct connection *c2;
